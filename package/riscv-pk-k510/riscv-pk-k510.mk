@@ -4,8 +4,10 @@
 #
 ################################################################################
 
-RISCV_PK_K510_VERSION = d645baf2964c3088f8cb08b4600e8f9f0fdeca4e
-RISCV_PK_K510_SITE = https://github.com/kendryte/k510_BBL.git
+#RISCV_PK_K510_VERSION = d645baf2964c3088f8cb08b4600e8f9f0fdeca4e
+#RISCV_PK_K510_SITE = https://github.com/kendryte/k510_BBL.git
+RISCV_PK_K510_VERSION = 425015225b9fee1187f4186d63a7adc7b2146084
+RISCV_PK_K510_SITE = git@github.com:gyangcan/k510_BBL.git
 RISCV_PK_K510_SITE_METHOD = git
 
 RISCV_PK_K510_LICENSE = BSD-3-Clause

@@ -1,0 +1,119 @@
+From cd3fc6e01688ee59b78cd5a50e7a17a90acee53a Mon Sep 17 00:00:00 2001
+From: yangguang <yangguang@canaan-creative.com>
+Date: Tue, 27 Sep 2022 15:09:29 +0800
+Subject: [PATCH] add sbi call to flush l1 dcache on remote cpu
+
+---
+ arch/riscv/andesv5/cache.c   | 18 ++++++++++++++++--
+ arch/riscv/include/asm/sbi.h | 16 ++++++++++++++++
+ 2 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/arch/riscv/andesv5/cache.c b/arch/riscv/andesv5/cache.c
+index 7a9270bd..29f2afca 100755
+--- a/arch/riscv/andesv5/cache.c
++++ b/arch/riscv/andesv5/cache.c
+@@ -64,13 +64,17 @@ void cpu_dcache_wb_range(unsigned long start, unsigned long end, int line_size)
+ {
+ 	int mhartid = get_cpu();
+ 	unsigned long pa;
++	ulong mask = (mhartid == 0)?2:1;
+ 
+ 	while (end > start) {
++		pa = virt_to_phys(start);
++
+ 		custom_csr_write(CCTL_REG_UCCTLBEGINADDR_NUM, start);
+ 		custom_csr_write(CCTL_REG_UCCTLCOMMAND_NUM, CCTL_L1D_VA_WB);
+ 
++		sbi_remote_dcache_wb(mask, start, pa);
++
+ 		if (l2c_base) {
+-			pa = virt_to_phys(start);
+ 			writel(pa, (void*)(l2c_base + L2C_REG_CN_ACC_OFFSET(mhartid)));
+ 			writel(CCTL_L2_PA_WB, (void*)(l2c_base + L2C_REG_CN_CMD_OFFSET(mhartid)));
+ 			while ((cpu_l2c_get_cctl_status() & CCTL_L2_STATUS_CN_MASK(mhartid))
+@@ -86,13 +90,17 @@ void cpu_dcache_inval_range(unsigned long start, unsigned long end, int line_siz
+ {
+ 	int mhartid = get_cpu();
+ 	unsigned long pa;
++	ulong mask = (mhartid == 0)?2:1;
+ 
+ 	while (end > start) {
++		pa = virt_to_phys(start);
++
+ 		custom_csr_write(CCTL_REG_UCCTLBEGINADDR_NUM, start);
+ 		custom_csr_write(CCTL_REG_UCCTLCOMMAND_NUM, CCTL_L1D_VA_INVAL);
+ 
++        sbi_remote_dcache_invalid(mask, start, pa);
++
+ 		if (l2c_base) {
+-			pa = virt_to_phys(start);
+ 			writel(pa, (void*)(l2c_base + L2C_REG_CN_ACC_OFFSET(mhartid)));
+ 			writel(CCTL_L2_PA_INVAL, (void*)(l2c_base + L2C_REG_CN_CMD_OFFSET(mhartid)));
+ 			while ((cpu_l2c_get_cctl_status() & CCTL_L2_STATUS_CN_MASK(mhartid))
+@@ -151,11 +159,14 @@ EXPORT_SYMBOL(cpu_dma_wb_range);
+ void k510_sharemem_dcache_inval_range(unsigned long va_start, unsigned long pa_start, unsigned long va_end, int line_size)
+ {
+ 	int mhartid = get_cpu();
++	ulong mask = (mhartid == 0)?2:1;
+ 
+ 	while (va_end > va_start) {
+ 		custom_csr_write(CCTL_REG_UCCTLBEGINADDR_NUM, va_start);
+ 		custom_csr_write(CCTL_REG_UCCTLCOMMAND_NUM, CCTL_L1D_VA_INVAL);
+ 
++		sbi_remote_dcache_invalid(mask, va_start, pa_start);
++
+ 		if (l2c_base) {
+ 			writel(pa_start, (void*)(l2c_base + L2C_REG_CN_ACC_OFFSET(mhartid)));
+ 			writel(CCTL_L2_PA_INVAL, (void*)(l2c_base + L2C_REG_CN_CMD_OFFSET(mhartid)));
+@@ -219,6 +230,7 @@ EXPORT_SYMBOL(k510_sharemem_inval_range);
+ void k510_sharemem_dcache_wb_range(unsigned long va_start, unsigned long pa_start, unsigned long va_end, int line_size)
+ {
+ 	int mhartid = get_cpu();
++	ulong mask = (mhartid == 0)?2:1;
+ #if 0
+ 	asm volatile ("fence.i");
+ 	custom_csr_write(CCTL_REG_UCCTLCOMMAND_NUM, CCTL_L1D_INVAL_ALL);
+@@ -232,6 +244,8 @@ void k510_sharemem_dcache_wb_range(unsigned long va_start, unsigned long pa_star
+ 		custom_csr_write(CCTL_REG_UCCTLBEGINADDR_NUM, va_start);
+ 		custom_csr_write(CCTL_REG_UCCTLCOMMAND_NUM, CCTL_L1D_VA_WB);
+ 
++		sbi_remote_dcache_wb(mask, va_start, pa_start);
++
+ 		if (l2c_base) {
+ 			writel(pa_start, (void*)(l2c_base + L2C_REG_CN_ACC_OFFSET(mhartid)));
+ 			writel(CCTL_L2_PA_WB, (void*)(l2c_base + L2C_REG_CN_CMD_OFFSET(mhartid)));
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index ad7c7fe8..00653863 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -30,6 +30,8 @@
+ #define SBI_READ_POWERBRAKE 11
+ #define SBI_WRITE_POWERBRAKE 12
+ #define SBI_GET_CYCLES 13
++#define SBI_REMOTE_DCACHE_WB 14
++#define SBI_REMOTE_DCACHE_INVALID 15
+ 
+ #define SBI_CALL(which, arg0, arg1, arg2) ({			\
+ 	register uintptr_t a0 asm ("a0") = (uintptr_t)(arg0);	\
+@@ -118,4 +120,18 @@ static inline void sbi_remote_sfence_vma_asid(const unsigned long *hart_mask,
+ 	SBI_CALL_1(SBI_REMOTE_SFENCE_VMA_ASID, hart_mask);
+ }
+ 
++static inline void sbi_remote_dcache_wb(unsigned long hart_mask,
++						  unsigned long va,
++						  unsigned long pa)
++{
++	SBI_CALL_3(SBI_REMOTE_DCACHE_WB, hart_mask, va, pa);
++}
++
++static inline void sbi_remote_dcache_invalid(unsigned long hart_mask,
++						  unsigned long va,
++						  unsigned long pa)
++{
++	SBI_CALL_3(SBI_REMOTE_DCACHE_INVALID, hart_mask, va, pa);
++}
++
+ #endif
+-- 
+2.17.1
+
